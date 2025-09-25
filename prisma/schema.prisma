@@ -1,0 +1,304 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+// Looking for ways to speed up your queries, or scale easily with your serverless or edge functions?
+// Try Prisma Accelerate: https://pris.ly/cli/accelerate-init
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "sqlite"
+  url      = env("DATABASE_URL")
+}
+
+// User model for Lens experts
+model User {
+  id                   String   @id @default(cuid())
+  email                String   @unique
+  name                 String?
+  expertiseKeywords    String   // Comma-separated keywords for core expertise
+  interestKeywords     String   // Comma-separated keywords for interests
+  connectionPreference String   // "deep_focus", "collaboration", "ad_hoc_advisory"
+  sendDigestToManager  Boolean  @default(false)
+  managerEmail         String?
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  profile              Profile?
+  interactions         UserInteraction[]
+  weeklyDigests        WeeklyDigest[]
+  startup              Startup?
+
+  @@map("users")
+}
+
+// Extended profile for additional user information
+model Profile {
+  id        String @id @default(cuid())
+  userId    String @unique
+  title     String?
+  team      String?
+  bio       String?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("profiles")
+}
+
+// Card types for the "Hand" interface
+enum CardType {
+  PROJECT
+  INSIGHT
+  CONNECTION
+  NUDGE
+}
+
+// Card model representing opportunities
+model Card {
+  id          String   @id @default(cuid())
+  type        CardType
+  title       String
+  description String
+  content     String   // Main content of the card
+  reason      String   // "Why This? Why Now?" explanation
+  keywords    String   // Comma-separated keywords for matching
+  source      String?  // e.g., "csv_import", "slack", "github"
+  sourceId    String?  // Original source identifier
+  priority    Int      @default(1) // 1-5, higher is more important
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  // Relations
+  interactions UserInteraction[]
+  digestItems   WeeklyDigestItem[]
+
+  @@map("cards")
+}
+
+// User interactions with cards
+enum InteractionType {
+  ACT_ON_IT
+  SHARE
+  NOT_NOW
+  NEVER_SHOW
+}
+
+model UserInteraction {
+  id           String          @id @default(cuid())
+  userId       String
+  cardId       String
+  type         InteractionType
+  sharedWith   String?         // Who it was shared with (manager, channel, etc.)
+  notes        String?         // User notes when acting on it
+  createdAt    DateTime        @default(now())
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  card Card @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@unique([userId, cardId, type])
+  @@map("user_interactions")
+}
+
+// Weekly digest sent to managers
+model WeeklyDigest {
+  id          String   @id @default(cuid())
+  userId      String
+  weekStart   DateTime
+  weekEnd     DateTime
+  content     String   // Summary of the week's activities
+  isSent      Boolean  @default(false)
+  sentAt      DateTime?
+  createdAt   DateTime @default(now())
+
+  user        User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  digestItems WeeklyDigestItem[]
+
+  @@unique([userId, weekStart])
+  @@map("weekly_digests")
+}
+
+// Items included in weekly digest
+model WeeklyDigestItem {
+  id          String   @id @default(cuid())
+  digestId    String
+  cardId      String
+  cardType    CardType
+  cardTitle   String
+  interaction InteractionType
+  sharedWith  String?
+  createdAt   DateTime @default(now())
+
+  digest WeeklyDigest @relation(fields: [digestId], references: [id], onDelete: Cascade)
+  card   Card         @relation(fields: [cardId], references: [id], onDelete: Cascade)
+
+  @@map("weekly_digest_items")
+}
+
+// Admin-managed topics for interest selection
+model Topic {
+  id          String   @id @default(cuid())
+  name        String   @unique
+  description String?
+  category    String?  // e.g., "technology", "project", "research"
+  isActive    Boolean  @default(true)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  @@map("topics")
+}
+
+// Startup profile for corporate side
+model Startup {
+  id                   String   @id @default(cuid())
+  userId               String   @unique  // Link to User table for authentication
+  name                 String
+  description          String?
+  industry             String?
+  stage                String?  // e.g., "seed", "series_a", "growth"
+  teamSize             Int?
+  website              String?
+  location             String?
+  foundedYear          Int?
+  funding              String?  // e.g., "$1M", "$5-10M"
+  techStack            String?  // Comma-separated technologies
+  businessModel        String?  // e.g., "SaaS", "marketplace", "B2B"
+  targetMarket         String?  // e.g., "enterprise", "SMB", "consumer"
+  isActive             Boolean  @default(true)
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
+
+  // Relations
+  user                  User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  gigs                  Gig[]
+  offers                Offer[]
+  startupInteractions   StartupInteraction[]
+
+  @@map("startups")
+}
+
+// Gig/Service offered by startups
+enum GigType {
+  DEVELOPMENT
+  CONSULTING
+  DESIGN
+  MARKETING
+  SALES
+  RESEARCH
+  SUPPORT
+  TRAINING
+  OTHER
+}
+
+enum GigStatus {
+  ACTIVE
+  PAUSED
+  COMPLETED
+  CANCELLED
+}
+
+model Gig {
+  id          String    @id @default(cuid())
+  startupId   String
+  title       String
+  description String
+  type        GigType
+  status      GigStatus @default(ACTIVE)
+  budget      String?   // e.g., "$1000-5000", "hourly $50-100"
+  duration    String?   // e.g., "1-2 weeks", "1-3 months"
+  requirements String?  // Detailed requirements
+  deliverables String?  // Expected deliverables
+  skills      String?   // Required skills (comma-separated)
+  experience  String?   // Required experience level
+  location    String?   // Remote/on-site/hybrid
+  priority    Int       @default(1) // 1-5, higher is more important
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  startup              Startup              @relation(fields: [startupId], references: [id], onDelete: Cascade)
+  offers               Offer[]
+  startupInteractions  StartupInteraction[]
+
+  @@map("gigs")
+}
+
+// Offers/Recommendations for startups
+enum OfferType {
+  PROJECT
+  PARTNERSHIP
+  INVESTMENT
+  ACQUISITION
+  COLLABORATION
+  MENTORSHIP
+  OTHER
+}
+
+enum OfferStatus {
+  PENDING
+  INTERESTED
+  IN_PROGRESS
+  ACCEPTED
+  DECLINED
+  EXPIRED
+}
+
+model Offer {
+  id          String     @id @default(cuid())
+  startupId   String
+  gigId       String?    // Optional: if this offer is related to a specific gig
+  type        OfferType
+  status      OfferStatus @default(PENDING)
+  title       String
+  description String
+  company     String?   // Name of the company making the offer
+  contact     String?   // Contact person/email
+  budget      String?   // Offer budget/investment amount
+  timeline    String?   // Expected timeline
+  terms       String?   // Terms and conditions
+  priority    Int       @default(1) // 1-5, higher is more important
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+
+  // Relations
+  startup              Startup              @relation(fields: [startupId], references: [id], onDelete: Cascade)
+  gig                  Gig?                 @relation(fields: [gigId], references: [id], onDelete: SetNull)
+  startupInteractions  StartupInteraction[]
+
+  @@map("offers")
+}
+
+// Startup interactions with gigs and offers
+enum StartupInteractionType {
+  VIEWED
+  INTERESTED
+  APPLIED
+  ACCEPTED
+  DECLINED
+  ARCHIVED
+}
+
+model StartupInteraction {
+  id           String                   @id @default(cuid())
+  startupId    String
+  gigId        String?                  // Optional: if interaction is with a gig
+  offerId      String?                  // Optional: if interaction is with an offer
+  type         StartupInteractionType
+  notes        String?                  // Startup notes
+  createdAt    DateTime                 @default(now())
+
+  startup Startup @relation(fields: [startupId], references: [id], onDelete: Cascade)
+  gig     Gig?    @relation(fields: [gigId], references: [id], onDelete: SetNull)
+  offer   Offer?  @relation(fields: [offerId], references: [id], onDelete: SetNull)
+
+  @@unique([startupId, gigId, type])
+  @@unique([startupId, offerId, type])
+  @@map("startup_interactions")
+}
